@@ -13,7 +13,8 @@ const execPromise = util.promisify(exec);
 const redis = new Redis({
   host: config.get('redis.host'),
   port: config.get('redis.port'),
-  password: config.get('redis.password')
+  password: config.get('redis.password'),
+  maxRetriesPerRequest: null // ✅ This is REQUIRED for BullMQ
 });
 
 const cvWorker = new Worker('cv-processing', async (job) => {

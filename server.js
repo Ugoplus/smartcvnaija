@@ -4,13 +4,31 @@ const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const TelegramBot = require('node-telegram-bot-api');
 const crypto = require('crypto');
+const { Pool } = require('pg'); 
+const Redis = require('ioredis'); 
 const config = require('./config');
 const logger = require('./utils/logger');
 const { statsd, trackMetric } = require('./utils/metrics');
 const bot = require('./services/bot');
 const openaiWorker = require('./workers/openai');
-
+const cvWorker = require('./workers/cv'); 
 const app = express();
+
+
+// Add database and redis connections
+const pool = new Pool({
+  host: config.get('database.host'),
+  port: config.get('database.port'),
+  database: config.get('database.name'),
+  user: config.get('database.user'),
+  password: config.get('database.password')
+});
+
+const redis = new Redis({
+  host: config.get('redis.host'),
+  port: config.get('redis.port'),
+  password: config.get('redis.password')
+});
 
 app.use((req, res, next) => {
   req.id = req.headers['x-request-id'] || uuidv4();
@@ -122,10 +140,16 @@ const server = app.listen(config.get('port'), () => {
 
 process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down');
-  server.close();
+  await new Promise(resolve => server.close(resolve)); // Wait for server to close
   await openaiWorker.close();
+  await cvWorker.close();
   await pool.end();
   await redis.quit();
   statsd.close();
   process.exit(0);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Rejection', { reason });
+  process.exit(1);
 });

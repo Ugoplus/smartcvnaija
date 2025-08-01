@@ -9,7 +9,7 @@ const openaiService = require('./openai');
 const paystackService = require('./paystack');
 const { Queue } = require('bullmq');
 const { v4: uuidv4 } = require('uuid');
-const TelegramBot = require('node-telegram-bot-api'); // Only create once
+const TelegramBot = require('node-telegram-bot-api');
 
 const pool = new Pool({
   host: config.get('database.host'),
@@ -39,8 +39,19 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// ✅ Create the Telegram bot instance ONCE and reuse it
-const telegramBot = new TelegramBot(config.get('telegram.token'), { polling: false });
+// ✅ Only create Telegram bot if token exists and is valid
+let telegramBot = null;
+const telegramToken = config.get('telegram.token');
+if (telegramToken && telegramToken.trim() !== '' && telegramToken !== 'your-telegram-token') {
+  try {
+    telegramBot = new TelegramBot(telegramToken, { polling: false });
+    logger.info('Telegram bot initialized in services/bot.js');
+  } catch (error) {
+    logger.error('Failed to initialize Telegram bot in services/bot.js', { error: error.message });
+  }
+} else {
+  logger.info('Telegram bot not initialized - no valid token provided');
+}
 
 class CVJobMatchingBot {
   async handleWhatsAppMessage(phone, message, file = null) {
@@ -242,7 +253,7 @@ class CVJobMatchingBot {
         return this.applyToJobs(identifier, jobIds);
       }
       default:
-        return this.sendMessage(identifier, intent.response || 'I didn’t understand that. Try "find jobs" or "upload CV".');
+        return this.sendMessage(identifier, intent.response || 'I didn\'t understand that. Try "find jobs" or "upload CV".');
     }
   }
 
@@ -300,18 +311,33 @@ class CVJobMatchingBot {
   }
 
   async sendWhatsAppMessage(phone, message) {
-    await axios.post('https://gate.whapi.cloud/messages/text', {
-      to: phone,
-      body: message
-    }, {
-      headers: { Authorization: `Bearer ${config.get('whatsapp.token')}` }
-    });
-    return message;
+    try {
+      await axios.post('https://gate.whapi.cloud/messages/text', {
+        to: phone,
+        body: message
+      }, {
+        headers: { Authorization: `Bearer ${config.get('whatsapp.token')}` }
+      });
+      return message;
+    } catch (error) {
+      logger.error('WhatsApp message failed', { phone, error: error.message });
+      throw error;
+    }
   }
 
+  // ✅ This is the method you were looking for!
   async sendTelegramMessage(chatId, message) {
-    await telegramBot.sendMessage(chatId, message);
-    return message;
+    if (!telegramBot) {
+      logger.warn('Telegram bot not initialized, cannot send message', { chatId });
+      return 'Telegram bot not available.';
+    }
+    try {
+      await telegramBot.sendMessage(chatId, message);
+      return message;
+    } catch (error) {
+      logger.error('Telegram message failed', { chatId, error: error.message });
+      throw error;
+    }
   }
 
   async sendMessage(identifier, message) {

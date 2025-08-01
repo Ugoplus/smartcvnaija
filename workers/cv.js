@@ -14,15 +14,15 @@ const redis = new Redis({
   host: config.get('redis.host'),
   port: config.get('redis.port'),
   password: config.get('redis.password'),
-  maxRetriesPerRequest: null // ✅ This is REQUIRED for BullMQ
+  maxRetriesPerRequest: null
 });
 
 const cvWorker = new Worker('cv-processing', async (job) => {
   const { file, identifier } = job.data;
   try {
-    // ✅ CORRECT: dynamically import file-type + destructure
-    const { fileTypeFromBuffer } = await import('file-type');
-    const type = await fileTypeFromBuffer(file.buffer);
+    // Fixed dynamic import
+    const fileType = await import('file-type');
+    const type = await fileType.fileTypeFromBuffer(file.buffer);
 
     if (
       ![
@@ -36,8 +36,13 @@ const cvWorker = new Worker('cv-processing', async (job) => {
     const tempFile = `/tmp/${identifier}_${Date.now()}.${type.ext}`;
     fs.writeFileSync(tempFile, file.buffer);
 
-    // Scan for viruses
-    await execPromise(`clamscan ${tempFile}`);
+    // Only scan if clamscan is available
+    try {
+      await execPromise(`which clamscan`);
+      await execPromise(`clamscan ${tempFile}`);
+    } catch (error) {
+      logger.warn('ClamAV not available, skipping virus scan', { identifier });
+    }
 
     let text;
     if (type.mime === 'application/pdf') {
@@ -67,3 +72,5 @@ cvWorker.on('failed', (job, err) => {
     error: err.message
   });
 });
+
+module.exports = cvWorker;

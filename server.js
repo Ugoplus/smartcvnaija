@@ -27,7 +27,8 @@ const pool = new Pool({
 const redis = new Redis({
   host: config.get('redis.host'),
   port: config.get('redis.port'),
-  password: config.get('redis.password')
+  password: config.get('redis.password'),
+  maxRetriesPerRequest: null  // ✅ ENSURE THIS IS HERE
 });
 
 app.use((req, res, next) => {

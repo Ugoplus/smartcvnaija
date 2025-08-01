@@ -9,6 +9,7 @@ const openaiService = require('./openai');
 const paystackService = require('./paystack');
 const { Queue } = require('bullmq');
 const { v4: uuidv4 } = require('uuid');
+const TelegramBot = require('node-telegram-bot-api'); // Only create once
 
 const pool = new Pool({
   host: config.get('database.host'),
@@ -37,6 +38,9 @@ const transporter = nodemailer.createTransport({
     pass: config.get('SMTP_PASS')
   }
 });
+
+// ✅ Create the Telegram bot instance ONCE and reuse it
+const telegramBot = new TelegramBot(config.get('telegram.token'), { polling: false });
 
 class CVJobMatchingBot {
   async handleWhatsAppMessage(phone, message, file = null) {
@@ -306,8 +310,7 @@ class CVJobMatchingBot {
   }
 
   async sendTelegramMessage(chatId, message) {
-    const bot = new (require('node-telegram-bot-api'))(config.get('telegram.token'));
-    await bot.sendMessage(chatId, message);
+    await telegramBot.sendMessage(chatId, message);
     return message;
   }
 
@@ -319,3 +322,5 @@ class CVJobMatchingBot {
     }
   }
 }
+
+module.exports = new CVJobMatchingBot();

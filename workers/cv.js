@@ -2,11 +2,12 @@ const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const config = require('../config');
 const logger = require('../utils/logger');
-const fileType = require('file-type');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const { exec } = require('child_process');
 const util = require('util');
+const fs = require('fs');
+
 const execPromise = util.promisify(exec);
 
 const redis = new Redis({
@@ -18,15 +19,25 @@ const redis = new Redis({
 const cvWorker = new Worker('cv-processing', async (job) => {
   const { file, identifier } = job.data;
   try {
-    const type = await fileType.fromBuffer(file.buffer);
-    if (!['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(type?.mime)) {
+    // ✅ CORRECT: dynamically import file-type + destructure
+    const { fileTypeFromBuffer } = await import('file-type');
+    const type = await fileTypeFromBuffer(file.buffer);
+
+    if (
+      ![
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      ].includes(type?.mime)
+    ) {
       throw new Error('Unsupported file type');
     }
 
     const tempFile = `/tmp/${identifier}_${Date.now()}.${type.ext}`;
-    require('fs').writeFileSync(tempFile, file.buffer);
+    fs.writeFileSync(tempFile, file.buffer);
 
+    // Scan for viruses
     await execPromise(`clamscan ${tempFile}`);
+
     let text;
     if (type.mime === 'application/pdf') {
       const data = await pdfParse(file.buffer);
@@ -36,8 +47,9 @@ const cvWorker = new Worker('cv-processing', async (job) => {
       text = value;
     }
 
-    require('fs').unlinkSync(tempFile);
+    fs.unlinkSync(tempFile);
     return text;
+
   } catch (error) {
     logger.error('CV processing error', { identifier, error });
     throw error;
@@ -49,5 +61,8 @@ cvWorker.on('completed', (job) => {
 });
 
 cvWorker.on('failed', (job, err) => {
-  logger.error('CV processing failed', { jobId: job.id, error: err.message });
+  logger.error('CV processing failed', {
+    jobId: job.id,
+    error: err.message
+  });
 });
